@@ -6,6 +6,7 @@ import (
 	"time"
 	"sync"
 	"log"
+	"errors"
 )
 
 const (
@@ -61,11 +62,9 @@ func (db *DB) restart() {
 		db.t, err = sql.Open(`mysql`, db.login)
 	}
 	for _, s := range db.stmts {
-		stmt, err := s.prepare()
-		if err != nil {
+		if s.prepare() != nil {
 			panic(errors.New(`Unable to prepare query: ` + s.query))
 		}
-		s.t = stmt
 	}
 	if db.verbose {
 		log.Println(`MySQL connection successful`)
@@ -84,7 +83,7 @@ func (db *DB) ping() {
 	for {
 		time.Sleep(pingWait)
 		db.mutex.RLock()
-		if s.close {
+		if db.close {
 			db.mutex.RUnlock()
 			return
 		}
@@ -120,7 +119,7 @@ func (s *DB) Query(q string, args ...interface{}) (*sql.Rows, error) {
 	rows, err := s.t.Query(q, args...)
 	if err != nil && err != sql.ErrNoRows && err != sql.ErrTxDone {
 		s.mutex.RUnlock()
-		once.Do(s.restart)
+		s.once.Do(s.restart)
 		s.mutex.RLock()
 		rows, err = s.t.Query(q, args...)
 	}
@@ -193,10 +192,10 @@ func (s *Stmt) QueryRow(args ...interface{}) row {
 }
 
 func (s *Stmt) prepare() error {
-	res, err := s.db.Prepare(s.query)
+	res, err := s.db.t.Prepare(s.query)
 	if err != nil {
 		time.Sleep(time.Second)
-		res, err = s.db.Prepare(s.query)
+		res, err = s.db.t.Prepare(s.query)
 		if err != nil {
 			return err
 		}
