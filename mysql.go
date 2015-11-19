@@ -47,7 +47,9 @@ func (db *DB) restart() {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
 	for _, s := range db.stmts {
-		s.t.Close()
+		if len(s.query) > 0 {
+			s.t.Close()
+		}
 	}
 	if db.t != nil {
 		db.t.Close()
@@ -142,6 +144,7 @@ func (s *DB) QueryRow(q string, args ...interface{}) row {
 func (s *DB) Prepare(query string) (*Stmt, error) {
 	stmt := &Stmt{db: s, query: query}
 	err := stmt.prepare()
+	s.stmts = append(s.stmts, stmt)
 	return stmt, err
 }
 
@@ -150,6 +153,7 @@ func (s *DB) MustPrepare(query string) *Stmt {
 	if err := stmt.prepare(); err != nil {
 		panic(err)
 	}
+	s.stmts = append(s.stmts, stmt)
 	return stmt
 }
 
