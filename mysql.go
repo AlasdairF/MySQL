@@ -145,6 +145,14 @@ func (s *DB) Prepare(query string) (*Stmt, error) {
 	return stmt, err
 }
 
+func (s *DB) MustPrepare(query string) *Stmt {
+	stmt := &Stmt{db: s, query: query}
+	if err := stmt.prepare(); err != nil {
+		panic(err)
+	}
+	return stmt
+}
+
 func (s *Stmt) Exec(args ...interface{}) (sql.Result, error) {
 	s.db.mutex.RLock()
 	defer s.db.mutex.RUnlock()
