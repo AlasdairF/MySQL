@@ -145,13 +145,6 @@ func (s *DB) Prepare(query string) (*Stmt, error) {
 	return stmt, err
 }
 
-func (s *DB) Close() error {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-	s.close = true
-	return s.t.Close()
-}
-
 func (s *Stmt) Exec(args ...interface{}) (sql.Result, error) {
 	s.db.mutex.RLock()
 	defer s.db.mutex.RUnlock()
@@ -192,6 +185,10 @@ func (s *Stmt) QueryRow(args ...interface{}) row {
 }
 
 func (s *Stmt) prepare() error {
+	if len(s.query) == 0 { // don't reprepare prepared query on restart if query has already been closed
+		s.t = nil
+		return nil
+	}
 	res, err := s.db.t.Prepare(s.query)
 	if err != nil {
 		time.Sleep(time.Second)
@@ -204,6 +201,7 @@ func (s *Stmt) prepare() error {
 	return nil
 }
 
+// The scan function is to be used with QueryRow
 func (r row) Scan(dest ...interface{}) error {
 	if r.err != nil {
 		return r.err
@@ -227,6 +225,28 @@ func (r row) Scan(dest ...interface{}) error {
 	return nil
 }
 
-func (s *Stmt) Close() error {
+// ============== OTHER FUNCTIONS ==============
+
+func (s *DB) Close() error {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	s.close = true
 	return s.t.Close()
+}
+
+func (s *Stmt) Close() error {
+	s.query = ``
+	return s.t.Close()
+}
+
+func (s *DB) SetMaxIdleConns(n int) {
+	s.t.SetMaxIdleConns(n)
+}
+
+func (s *DB) SetMaxOpenConns(n int) {
+	s.t.SetMaxOpenConns(n)
+}
+
+func (s *DB) Stats() sql.DBStats {
+	return s.t.Stats()
 }
