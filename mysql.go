@@ -48,7 +48,7 @@ func (db *DB) restart(tim int64) {
 	if tim > db.lastreset {
 		return
 	}
-	if db.verbose {
+	if db.verbose && tim > 0 {
 		log.Println(`Closing and reopening MySQL`)
 	}
 	for _, s := range db.stmts {
