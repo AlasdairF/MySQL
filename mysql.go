@@ -11,17 +11,16 @@ import (
 
 const (
 	pingWait = time.Minute * 2
-	resetWait = time.Second * 10
 )
 
 type DB struct {
 	t *sql.DB
-	once sync.Once
 	mutex sync.RWMutex
 	stmts []*Stmt
 	login string
 	verbose bool
 	close bool
+	lastreset int64
 }
 type Stmt struct {
 	t *sql.Stmt
@@ -38,14 +37,20 @@ func Open(login string, verbose bool) *DB {
 	db := new(DB)
 	db.login = login
 	db.verbose = verbose
-	db.once.Do(db.restart)
+	db.restart(0)
 	go db.ping()
 	return db
 }
 
-func (db *DB) restart() {
+func (db *DB) restart(tim int64) {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
+	if tim > db.lastreset {
+		return
+	}
+	if db.verbose {
+		log.Println(`Closing and reopening MySQL`)
+	}
 	for _, s := range db.stmts {
 		if len(s.query) > 0 {
 			s.t.Close()
@@ -68,20 +73,15 @@ func (db *DB) restart() {
 			panic(errors.New(`Unable to prepare query: ` + s.query))
 		}
 	}
+	db.lastreset = time.Now().UnixNano()
 	if db.verbose {
 		log.Println(`MySQL connection successful`)
 	}
-	go db.resetOnce() // Start the timer to reset the ability to restart
-}
-
-// Stops reconnection from happening within 10 seconds of a previous reconnection
-func (db *DB) resetOnce() {
-	time.Sleep(resetWait)
-	db.once = sync.Once{}
 }
 
 // Pings to connection every 2 minutes to keep it alive, if it appears to be down then restart the connection
 func (db *DB) ping() {
+	var tim int64
 	for {
 		time.Sleep(pingWait)
 		db.mutex.RLock()
@@ -89,10 +89,11 @@ func (db *DB) ping() {
 			db.mutex.RUnlock()
 			return
 		}
+		tim = time.Now().UnixNano()
 		if db.t.Ping() != nil {
 			if db.t.Ping() != nil { // try again
 				db.mutex.RUnlock()
-				db.once.Do(db.restart)
+				db.restart(tim)
 				db.mutex.RLock()
 			}
 		}
@@ -105,10 +106,14 @@ func (db *DB) ping() {
 func (s *DB) Exec(q string, args ...interface{}) (sql.Result, error) {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
+	tim := time.Now().UnixNano()
 	res, err := s.t.Exec(q, args...)
 	if err != nil && err != sql.ErrNoRows && err != sql.ErrTxDone {
+		if s.verbose {
+			log.Println(`Error DB Exec:`, err)
+		}
 		s.mutex.RUnlock()
-		s.once.Do(s.restart)
+		s.restart(tim)
 		s.mutex.RLock()
 		res, err = s.t.Exec(q, args...)
 	}
@@ -118,10 +123,14 @@ func (s *DB) Exec(q string, args ...interface{}) (sql.Result, error) {
 func (s *DB) Query(q string, args ...interface{}) (*sql.Rows, error) {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
+	tim := time.Now().UnixNano()
 	rows, err := s.t.Query(q, args...)
 	if err != nil && err != sql.ErrNoRows && err != sql.ErrTxDone {
+		if s.verbose {
+			log.Println(`Error DB Query:`, err)
+		}
 		s.mutex.RUnlock()
-		s.once.Do(s.restart)
+		s.restart(tim)
 		s.mutex.RLock()
 		rows, err = s.t.Query(q, args...)
 	}
@@ -131,10 +140,14 @@ func (s *DB) Query(q string, args ...interface{}) (*sql.Rows, error) {
 func (s *DB) QueryRow(q string, args ...interface{}) row {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
+	tim := time.Now().UnixNano()
 	rows, err := s.t.Query(q, args...)
 	if err != nil && err != sql.ErrNoRows && err != sql.ErrTxDone {
+		if s.verbose {
+			log.Println(`Error DB QueryRow:`, err)
+		}
 		s.mutex.RUnlock()
-		s.once.Do(s.restart)
+		s.restart(tim)
 		s.mutex.RLock()
 		rows, err = s.t.Query(q, args...)
 	}
@@ -160,10 +173,14 @@ func (s *DB) MustPrepare(query string) *Stmt {
 func (s *Stmt) Exec(args ...interface{}) (sql.Result, error) {
 	s.db.mutex.RLock()
 	defer s.db.mutex.RUnlock()
+	tim := time.Now().UnixNano()
 	res, err := s.t.Exec(args...)
 	if err != nil && err != sql.ErrNoRows && err != sql.ErrTxDone {
+		if s.verbose {
+			log.Println(`Error Stmt Exec:`, err)
+		}
 		s.db.mutex.RUnlock()
-		s.db.once.Do(s.db.restart)
+		s.db.restart(tim)
 		s.db.mutex.RLock()
 		res, err = s.t.Exec(args...)
 	}
@@ -173,10 +190,14 @@ func (s *Stmt) Exec(args ...interface{}) (sql.Result, error) {
 func (s *Stmt) Query(args ...interface{}) (*sql.Rows, error) {
 	s.db.mutex.RLock()
 	defer s.db.mutex.RUnlock()
+	tim := time.Now().UnixNano()
 	rows, err := s.t.Query(args...)
 	if err != nil && err != sql.ErrNoRows && err != sql.ErrTxDone {
+		if s.verbose {
+			log.Println(`Error Stmt Query:`, err)
+		}
 		s.db.mutex.RUnlock()
-		s.db.once.Do(s.db.restart)
+		s.db.restart(tim)
 		s.db.mutex.RLock()
 		rows, err = s.t.Query(args...)
 	}
@@ -186,10 +207,14 @@ func (s *Stmt) Query(args ...interface{}) (*sql.Rows, error) {
 func (s *Stmt) QueryRow(args ...interface{}) row {
 	s.db.mutex.RLock()
 	defer s.db.mutex.RUnlock()
+	tim := time.Now().UnixNano()
 	rows, err := s.t.Query(args...)
 	if err != nil && err != sql.ErrNoRows && err != sql.ErrTxDone {
+		if s.verbose {
+			log.Println(`Error Stmt QueryRow:`, err)
+		}
 		s.db.mutex.RUnlock()
-		s.db.once.Do(s.db.restart)
+		s.db.restart(tim)
 		s.db.mutex.RLock()
 		rows, err = s.t.Query(args...)
 	}
