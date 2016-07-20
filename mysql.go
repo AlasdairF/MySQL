@@ -176,7 +176,7 @@ func (s *Stmt) Exec(args ...interface{}) (sql.Result, error) {
 	tim := time.Now().UnixNano()
 	res, err := s.t.Exec(args...)
 	if err != nil && err != sql.ErrNoRows && err != sql.ErrTxDone {
-		if s.verbose {
+		if s.db.verbose {
 			log.Println(`Error Stmt Exec:`, err)
 		}
 		s.db.mutex.RUnlock()
@@ -193,7 +193,7 @@ func (s *Stmt) Query(args ...interface{}) (*sql.Rows, error) {
 	tim := time.Now().UnixNano()
 	rows, err := s.t.Query(args...)
 	if err != nil && err != sql.ErrNoRows && err != sql.ErrTxDone {
-		if s.verbose {
+		if s.db.verbose {
 			log.Println(`Error Stmt Query:`, err)
 		}
 		s.db.mutex.RUnlock()
@@ -210,7 +210,7 @@ func (s *Stmt) QueryRow(args ...interface{}) row {
 	tim := time.Now().UnixNano()
 	rows, err := s.t.Query(args...)
 	if err != nil && err != sql.ErrNoRows && err != sql.ErrTxDone {
-		if s.verbose {
+		if s.db.verbose {
 			log.Println(`Error Stmt QueryRow:`, err)
 		}
 		s.db.mutex.RUnlock()
